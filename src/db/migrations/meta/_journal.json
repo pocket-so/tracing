@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1769600628940,
+      "tag": "0000_married_loners",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1769610331931,
+      "tag": "0001_goofy_luke_cage",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1769611983095,
+      "tag": "0002_light_forge",
+      "breakpoints": true
+    }
+  ]
+}

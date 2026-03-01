@@ -1,0 +1,27 @@
+# Dependencies.
+node_modules
+
+# Build output.
+out
+dist
+build
+target
+gen
+bin
+
+# Build caches.
+.turbo
+.wrangler
+.react-router
+
+# Environment variable files.
+.env
+
+# macOS.
+.DS_Store
+
+# Infrastructure.
+hosts
+*.tfvars
+.terraform
+.agent/CONTINUITY.md
