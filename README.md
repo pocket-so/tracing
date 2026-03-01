@@ -2,6 +2,8 @@
 
 Internal tracing helpers for Hono backends (Node/Bun/Cloudflare Workers).
 
+![Display of the trace and spans in Axiom](/assets/tracing.png)
+
 ## Install
 
 ```bash
@@ -15,7 +17,6 @@ Skip tracing for specific paths. Use `ignore.list` for the paths and `ignore.exa
 - **`exact: true`** (default) – only paths in the list are ignored (exact match).
 - **`exact: false`** – each list entry also matches nested subpaths (e.g. `/openapi` ignores `/openapi`, `/openapi/spec`, `/openapi/docs`).
 
-Legacy: you can still pass an array of strings; it is treated as `{ exact: true, list: [...] }`.
 
 ```typescript
 app.use(
