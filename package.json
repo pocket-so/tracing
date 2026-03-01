@@ -1,6 +1,6 @@
 {
   "name": "@pocket/tracing",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "exports": {
     "./timescale/db": {
@@ -51,6 +51,7 @@
     "build": "obuild",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
+    "test": "bun test",
     "drizzle:studio": "drizzle-kit studio",
     "drizzle:generate": "drizzle-kit generate",
     "drizzle:migrate": "drizzle-kit migrate"

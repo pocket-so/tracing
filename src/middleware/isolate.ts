@@ -16,3 +16,8 @@ export const getOrCreateIsolateInstance = (): Isolate => {
 
   return instance;
 };
+
+/** Test helper to reset isolate singleton state between unit tests. */
+export const resetIsolateInstanceForTests = (): void => {
+  instance = null;
+};

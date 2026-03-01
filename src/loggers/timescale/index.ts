@@ -13,13 +13,7 @@ import {
 
 import type { Timescale } from '@/db';
 import type { InsertTrace } from '@/db/schema/traces/db';
-import type {
-  Logger,
-  LoggerHealth,
-  ServiceMetadata,
-  SpanAttributeValue,
-  TraceSnapshot,
-} from '@/types';
+import type { Logger, ServiceMetadata, SpanAttributeValue, TraceSnapshot } from '@/types';
 
 import { Traces } from '@/db/schema/traces/db';
 import { DEFAULT_BATCH_SIZE } from '@/utils/constants';
@@ -37,11 +31,6 @@ const DUPLICATE_ATTR_KEYS = new Set<string>([
   // oxlint-disable-next-line new-cap - required by otlp
   ATTR_HTTP_REQUEST_HEADER('user-agent'),
 ]);
-
-const pickString = (value: SpanAttributeValue | undefined): string | null =>
-  typeof value === 'string' ? value : null;
-const pickNumber = (value: SpanAttributeValue | undefined): number | null =>
-  typeof value === 'number' ? value : null;
 
 const hasDuplicateKeys = (obj?: Record<string, SpanAttributeValue>): boolean => {
   if (!obj) return false;
@@ -93,24 +82,48 @@ const buildTraceRows = (
     const spanAttrs = span.attributes;
     const attributes = buildAttributes(spanAttrs);
 
-    const exceptionType = pickString(spanAttrs[ATTR_EXCEPTION_TYPE]);
-    const exceptionMessage = pickString(spanAttrs[ATTR_EXCEPTION_MESSAGE]);
-    const exceptionStacktrace = pickString(spanAttrs[ATTR_EXCEPTION_STACKTRACE]);
+    const exceptionType =
+      typeof spanAttrs[ATTR_EXCEPTION_TYPE] === 'string'
+        ? spanAttrs[ATTR_EXCEPTION_TYPE]
+        : null;
+    const exceptionMessage =
+      typeof spanAttrs[ATTR_EXCEPTION_MESSAGE] === 'string'
+        ? spanAttrs[ATTR_EXCEPTION_MESSAGE]
+        : null;
+    const exceptionStacktrace =
+      typeof spanAttrs[ATTR_EXCEPTION_STACKTRACE] === 'string'
+        ? spanAttrs[ATTR_EXCEPTION_STACKTRACE]
+        : null;
 
-    const httpMethod = pickString(spanAttrs[ATTR_HTTP_REQUEST_METHOD]);
-    const httpRoute = pickString(spanAttrs[ATTR_HTTP_ROUTE]);
-    const httpStatusCode = pickNumber(spanAttrs[ATTR_HTTP_RESPONSE_STATUS_CODE]);
-    const httpUrl = pickString(spanAttrs[ATTR_URL_FULL]);
-    const httpHost = pickString(spanAttrs[ATTR_SERVER_ADDRESS]);
-    const httpUserAgent = pickString(spanAttrs[ATTR_USER_AGENT_ORIGINAL]);
+    const httpMethod =
+      typeof spanAttrs[ATTR_HTTP_REQUEST_METHOD] === 'string'
+        ? spanAttrs[ATTR_HTTP_REQUEST_METHOD]
+        : null;
+    const httpRoute =
+      typeof spanAttrs[ATTR_HTTP_ROUTE] === 'string' ? spanAttrs[ATTR_HTTP_ROUTE] : null;
+    const httpStatusCodeRaw = spanAttrs[ATTR_HTTP_RESPONSE_STATUS_CODE];
+    const httpStatusCode =
+      typeof httpStatusCodeRaw === 'number' && Number.isFinite(httpStatusCodeRaw)
+        ? httpStatusCodeRaw
+        : null;
+    const httpUrl =
+      typeof spanAttrs[ATTR_URL_FULL] === 'string' ? spanAttrs[ATTR_URL_FULL] : null;
+    const httpHost =
+      typeof spanAttrs[ATTR_SERVER_ADDRESS] === 'string'
+        ? spanAttrs[ATTR_SERVER_ADDRESS]
+        : null;
+    const httpUserAgent =
+      typeof spanAttrs[ATTR_USER_AGENT_ORIGINAL] === 'string'
+        ? spanAttrs[ATTR_USER_AGENT_ORIGINAL]
+        : null;
 
     rows[i] = {
       traceId,
       spanId: span.id,
-      parentSpanId: span.parentSpanId,
+      parentSpanId: span.parentSpanId ?? null,
       startTime: new Date(span.startTime),
       endTime: span.endTime ? new Date(span.endTime) : null,
-      durationMs: span.duration,
+      durationMs: span.duration ?? null,
       attributes,
       exceptionType,
       exceptionMessage,
@@ -151,15 +164,15 @@ class TimescaleLogger implements Logger {
   private db: TimescaleLoggerConfig['db'];
   private metadata: ServiceMetadata;
 
-  private lastError?: Error;
-  private lastSuccess?: Date;
-
   private constructor(config: TimescaleLoggerConfig) {
     this.batchSize = config.batchSize ?? DEFAULT_BATCH_SIZE;
     this.db = config.db;
     this.metadata = config.metadata;
   }
 
+  /**
+   * Returns the singleton instance. First config wins; later calls ignore config.
+   */
   static getInstance(config: TimescaleLoggerConfig): TimescaleLogger {
     if (!TimescaleLogger.instance) {
       TimescaleLogger.instance = new TimescaleLogger(config);
@@ -167,59 +180,62 @@ class TimescaleLogger implements Logger {
     return TimescaleLogger.instance;
   }
 
-  private insertBatch = async (rows: Array<InsertTrace>): Promise<void> => {
-    if (rows.length === 0) return;
-    await this.db.insert(Traces).values(rows);
+  /**
+   * Creates a new instance without touching the singleton. Use for tests or multiple configs.
+   */
+  static create(config: TimescaleLoggerConfig): TimescaleLogger {
+    return new TimescaleLogger(config);
+  }
+
+  private insertBatch = async (
+    rows: Array<InsertTrace>,
+    onError?: (error?: Error) => void | undefined,
+  ): Promise<boolean> => {
+    if (rows.length === 0) return true;
+    try {
+      await this.db.insert(Traces).values(rows);
+      return true;
+    } catch (error) {
+      onError?.(error as Error);
+      return false;
+    }
   };
 
   /**
    * Commit traces to TimescaleDB
    * Returns array of traces that failed to commit (empty array = all success)
    */
-  commit = async (traces: Array<TraceSnapshot>): Promise<Array<TraceSnapshot>> => {
+  commit = async (
+    traces: Array<TraceSnapshot>,
+    onError?: (error?: Error) => void | undefined,
+  ): Promise<Array<TraceSnapshot>> => {
     const batchSize = Math.max(1, this.batchSize);
     const batch: Array<InsertTrace> = [];
     let hasRows = false;
 
-    try {
-      for (const trace of traces) {
-        if (trace.spans.length === 0) continue;
-        const rows = buildTraceRows(trace, this.metadata);
-        if (rows.length === 0) continue;
-        hasRows = true;
-        for (const row of rows) {
-          batch.push(row);
-          if (batch.length >= batchSize) {
-            await this.insertBatch(batch);
-            batch.length = 0;
-          }
+    for (const trace of traces) {
+      if (trace.spans.length === 0) continue;
+      const rows = buildTraceRows(trace, this.metadata);
+      if (rows.length === 0) continue;
+      hasRows = true;
+      for (const row of rows) {
+        batch.push(row);
+        if (batch.length >= batchSize) {
+          if (!(await this.insertBatch(batch, onError))) return traces;
+          batch.length = 0;
         }
       }
-
-      if (!hasRows) return [];
-      if (batch.length > 0) {
-        await this.insertBatch(batch);
-      }
-
-      this.lastSuccess = new Date();
-      this.lastError = undefined;
-      return []; // All traces committed successfully
-    } catch (error) {
-      this.lastError = error as Error;
-      // All traces failed (we don't have per-trace granularity for DB errors)
-      return traces;
     }
-  };
 
-  health = (): LoggerHealth => ({
-    healthy: this.lastError === undefined || this.lastSuccess !== undefined,
-    lastError: this.lastError,
-    lastSuccess: this.lastSuccess,
-  });
+    if (!hasRows) return [];
+
+    return (await this.insertBatch(batch, onError)) ? [] : traces;
+  };
 }
 
 /**
- * Create a logger that exports traces to TimescaleDB.
+ * Returns the singleton Timescale logger. First config wins; subsequent calls return the same
+ * instance and ignore config. For a new instance (e.g. tests), use createTimescaleLogger.
  *
  * @param config - Options:
  * - metadata: Service metadata
@@ -228,3 +244,13 @@ class TimescaleLogger implements Logger {
  */
 export const getTimescaleLogger = (config: TimescaleLoggerConfig): Logger =>
   TimescaleLogger.getInstance(config);
+
+/**
+ * Creates a new Timescale logger instance without using or updating the singleton.
+ * Use for tests or when you need multiple instances.
+ *
+ * @param config - Same as getTimescaleLogger.
+ * @returns A new Logger instance.
+ */
+export const createTimescaleLogger = (config: TimescaleLoggerConfig): Logger =>
+  TimescaleLogger.create(config);

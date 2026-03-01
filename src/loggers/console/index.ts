@@ -1,4 +1,4 @@
-import type { Logger, LoggerHealth, ServiceMetadata, TraceSnapshot } from '@/types';
+import type { Logger, ServiceMetadata, TraceSnapshot } from '@/types';
 
 export interface ConsoleLoggerConfig {
   metadata: ServiceMetadata;
@@ -10,9 +10,6 @@ class ConsoleLogger implements Logger {
   public readonly id = 'console';
   private readonly metadata: ServiceMetadata;
 
-  private lastError?: Error;
-  private lastSuccess?: Date;
-
   private formatPayload = (payload: Record<string, unknown>): string =>
     Object.entries(payload)
       .map(([key, value]) => `${key}=${String(value)}`)
@@ -22,6 +19,9 @@ class ConsoleLogger implements Logger {
     this.metadata = config.metadata;
   }
 
+  /**
+   * Returns the singleton instance. First config wins; later calls ignore config.
+   */
   static getInstance(config: ConsoleLoggerConfig): ConsoleLogger {
     if (!ConsoleLogger.instance) {
       ConsoleLogger.instance = new ConsoleLogger(config);
@@ -29,34 +29,45 @@ class ConsoleLogger implements Logger {
     return ConsoleLogger.instance;
   }
 
-  commit = async (traces: Array<TraceSnapshot>): Promise<Array<TraceSnapshot>> => {
-    try {
-      const spanCount = traces.reduce((total, trace) => total + trace.spans.length, 0);
-      const output = this.formatPayload({
-        count: traces.length,
-        spans: spanCount,
-        service: this.metadata.service,
-        version: this.metadata.version,
-        environment: this.metadata.environment,
-      });
-      const timestamp = new Date().toISOString();
-      console.log(`level=log ts=${timestamp} msg=trace-batch ${output}`);
-      this.lastSuccess = new Date();
-      this.lastError = undefined;
-      return []; // All traces committed successfully
-    } catch (error) {
-      console.error('[console-logger] Error:', error);
-      this.lastError = error as Error;
-      return traces;
-    }
-  };
+  /**
+   * Creates a new instance without touching the singleton. Use for tests or multiple configs.
+   */
+  static create(config: ConsoleLoggerConfig): ConsoleLogger {
+    return new ConsoleLogger(config);
+  }
 
-  health = (): LoggerHealth => ({
-    healthy: this.lastError === undefined || this.lastSuccess !== undefined,
-    lastError: this.lastError,
-    lastSuccess: this.lastSuccess,
-  });
+  commit = async (traces: Array<TraceSnapshot>): Promise<Array<TraceSnapshot>> => {
+    const spanCount = traces.reduce((total, trace) => total + trace.spans.length, 0);
+
+    const output = this.formatPayload({
+      count: traces.length,
+      spans: spanCount,
+      service: this.metadata.service,
+      version: this.metadata.version,
+      environment: this.metadata.environment,
+    });
+
+    const timestamp = new Date().toISOString();
+
+    console.log(`level=log ts=${timestamp} msg=trace-batch ${output}`);
+
+    return [];
+  };
 }
 
+/**
+ * Returns the singleton Console logger. First config wins; subsequent calls return the same
+ * instance and ignore config. For a new instance (e.g. tests), use createConsoleLogger.
+ */
 export const getConsoleLogger = (config: ConsoleLoggerConfig): Logger =>
   ConsoleLogger.getInstance(config);
+
+/**
+ * Creates a new Console logger instance without using or updating the singleton.
+ * Use for tests or when you need multiple instances.
+ *
+ * @param config - Same as getConsoleLogger.
+ * @returns A new Logger instance.
+ */
+export const createConsoleLogger = (config: ConsoleLoggerConfig): Logger =>
+  ConsoleLogger.create(config);

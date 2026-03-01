@@ -265,11 +265,7 @@ export class TracerImpl implements Tracer {
       stats.failed += result.failed.length;
 
       if (result.error) {
-        stats.lastError = result.error;
         loggerErrors.push({ id: logger.id, error: result.error });
-      } else {
-        stats.lastError = undefined;
-        stats.lastSuccess = new Date();
       }
 
       if (result.failed.length > 0) {
@@ -330,7 +326,7 @@ export class TracerImpl implements Tracer {
 
     while (failed.length > 0 && attempt < this.config.maxRetries) {
       try {
-        failed = await logger.commit(failed);
+        failed = await logger.commit(failed, this.config.onError);
 
         if (failed.length === 0) {
           return { failed: [] };

@@ -11,7 +11,6 @@ export default defineBuildConfig({
         'src/loggers/console/index.ts',
         'src/middleware/index.ts',
         'src/utils/helpers.ts',
-        'src/types/index.ts',
         'src/db/index.ts',
       ],
       rolldown: {

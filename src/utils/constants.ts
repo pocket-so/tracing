@@ -1,5 +1,5 @@
-/** Default timeout for logger operations (30 seconds) */
-export const DEFAULT_LOGGER_TIMEOUT_MS = 30_000;
+/** Default timeout for logger operations (10 seconds) */
+export const DEFAULT_LOGGER_TIMEOUT_MS = 10_000;
 
 /** Default max length for stacktrace attributes */
 export const DEFAULT_STACKTRACE_MAX_LENGTH = 2_000;

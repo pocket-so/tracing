@@ -64,20 +64,14 @@ export interface TracerStats {
 export interface LoggerStats {
   committed: number;
   failed: number;
-  lastError?: Error;
-  lastSuccess?: Date;
 }
 
 export interface Logger {
   readonly id: string;
-  commit(traces: Array<TraceSnapshot>): Promise<Array<TraceSnapshot>>;
-  health?(): LoggerHealth;
-}
-
-export interface LoggerHealth {
-  healthy: boolean;
-  lastError?: Error;
-  lastSuccess?: Date;
+  commit(
+    traces: Array<TraceSnapshot>,
+    onError?: (error?: Error) => void | undefined,
+  ): Promise<Array<TraceSnapshot>>;
 }
 
 export interface TracerConfig {
@@ -88,6 +82,7 @@ export interface TracerConfig {
   maxPendingTraces: number;
   maxRetries: number;
   retryDelay: number;
+  onError?: (error?: Error) => void | undefined;
   debug: boolean;
 }
 

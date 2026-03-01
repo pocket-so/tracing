@@ -9,7 +9,7 @@ export const TraceSchema = z.object({
     description: 'Identifier of the span',
     example: '30p3uKFhJdCEJyui',
   }),
-  parentSpanId: z.string().length(16).openapi({
+  parentSpanId: z.string().length(16).nullable().openapi({
     description: 'Identifier of the parent span',
     example: '15Zt2TjkiHQP3ePg',
   }),

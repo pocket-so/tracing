@@ -1,18 +1,13 @@
 import type { InstrumentationScope } from '@opentelemetry/core';
-import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base';
 
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 
-import type {
-  Logger,
-  LoggerHealth,
-  ServiceMetadata,
-  SpanAttributeValue,
-  TraceSnapshot,
-} from '@/types';
+import type { Logger, ServiceMetadata, SpanAttributeValue, TraceSnapshot } from '@/types';
 import type { SpanHooks } from '@/utils/otlp';
 
+import { DEFAULT_LOGGER_TIMEOUT_MS } from '@/utils/constants';
 import { isErrorSpan, statusResolver } from '@/utils/errors';
 import {
   buildResourceAttributes,
@@ -33,31 +28,32 @@ export interface SentryLoggerConfig {
   metadata: ServiceMetadata;
   /** OTLP batch export timeout in ms. */
   timeoutMs?: number;
+  /** Optional OTLP exporter (for tests). When set, used instead of creating one. */
+  exporter?: SpanExporter;
 }
 
 class SentryLogger implements Logger {
   private static instance: SentryLogger | null = null;
 
   public readonly id = 'sentry';
-  private exporter: OTLPTraceExporter;
+  private exporter: SpanExporter;
   private resource: ReturnType<typeof resourceFromAttributes>;
 
   private readonly scope: InstrumentationScope = { name: 'tracing' };
   private readonly spanHooks: SpanHooks;
-
-  private lastError?: Error;
-  private lastSuccess?: Date;
 
   private constructor(config: SentryLoggerConfig) {
     const headers: Record<string, string> = {
       'x-sentry-auth': `sentry sentry_key=${config.token}, sentry_version=7, sentry_client=tracing/1.0`,
     };
 
-    this.exporter = new OTLPTraceExporter({
-      url: config.endpoint,
-      headers,
-      timeoutMillis: config.timeoutMs,
-    });
+    this.exporter =
+      config.exporter ??
+      new OTLPTraceExporter({
+        url: config.endpoint,
+        headers,
+        timeoutMillis: config.timeoutMs ?? DEFAULT_LOGGER_TIMEOUT_MS,
+      });
 
     this.resource = resourceFromAttributes(buildResourceAttributes(config.metadata));
 
@@ -68,11 +64,21 @@ class SentryLogger implements Logger {
     };
   }
 
+  /**
+   * Returns the singleton instance. First config wins; later calls ignore config.
+   */
   static getInstance(config: SentryLoggerConfig): SentryLogger {
     if (!SentryLogger.instance) {
       SentryLogger.instance = new SentryLogger(config);
     }
     return SentryLogger.instance;
+  }
+
+  /**
+   * Creates a new instance without touching the singleton. Use for tests or multiple configs.
+   */
+  static create(config: SentryLoggerConfig): SentryLogger {
+    return new SentryLogger(config);
   }
 
   private mapAttributes = (
@@ -86,7 +92,10 @@ class SentryLogger implements Logger {
    * Commit traces to Sentry (only error traces)
    * Returns array of traces that failed to commit (empty array = all success)
    */
-  commit = async (traces: Array<TraceSnapshot>): Promise<Array<TraceSnapshot>> => {
+  commit = async (
+    traces: Array<TraceSnapshot>,
+    onError?: (error?: Error) => void | undefined,
+  ): Promise<Array<TraceSnapshot>> => {
     const allSpans: Array<ReadableSpan> = [];
 
     for (const trace of traces) {
@@ -106,33 +115,31 @@ class SentryLogger implements Logger {
     // If no error spans, return empty (success - nothing to send)
     if (allSpans.length === 0) return [];
 
-    try {
-      await exportSpans(this.exporter, allSpans);
-      this.lastSuccess = new Date();
-      this.lastError = undefined;
-      return []; // All traces committed successfully
-    } catch (error) {
-      this.lastError = error as Error;
-      // All traces failed
-      return traces;
-    }
+    return (await exportSpans({ exporter: this.exporter, spans: allSpans, onError }))
+      ? []
+      : traces;
   };
-
-  health = (): LoggerHealth => ({
-    healthy: this.lastError === undefined || this.lastSuccess !== undefined,
-    lastError: this.lastError,
-    lastSuccess: this.lastSuccess,
-  });
 }
 
 /**
- * Create a logger that exports traces to Sentry via OTLP.
+ * Returns the singleton Sentry logger. First config wins; subsequent calls return the same
+ * instance and ignore config. For a new instance (e.g. tests), use createSentryLogger.
  *
  * @param config - Options:
  * - endpoint: Sentry OTLP endpoint URL
  * - token: Sentry auth token
  * - metadata: Service metadata
- * - timeoutMs: OTLP batch export timeout (default: 10000)
+ * - timeoutMs: OTLP batch export timeout (default: 10000, from DEFAULT_LOGGER_TIMEOUT_MS)
  */
 export const getSentryLogger = (config: SentryLoggerConfig): Logger =>
   SentryLogger.getInstance(config);
+
+/**
+ * Creates a new Sentry logger instance without using or updating the singleton.
+ * Use for tests or when you need multiple instances.
+ *
+ * @param config - Same as getSentryLogger.
+ * @returns A new Logger instance.
+ */
+export const createSentryLogger = (config: SentryLoggerConfig): Logger =>
+  SentryLogger.create(config);

@@ -1,7 +1,7 @@
 import type { HrTime, SpanContext } from '@opentelemetry/api';
-import type { InstrumentationScope } from '@opentelemetry/core';
+import type { ExportResult, InstrumentationScope } from '@opentelemetry/core';
 import type { Resource } from '@opentelemetry/resources';
-import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base';
 
 import { SpanKind, SpanStatusCode, TraceFlags } from '@opentelemetry/api';
 import { ExportResultCode } from '@opentelemetry/core';
@@ -82,13 +82,16 @@ export const toReadableSpan = (
   const status = hooks.statusResolver
     ? hooks.statusResolver(span)
     : { code: SpanStatusCode.UNSET };
+
   const spanKind = (hooks.spanKindResolver ?? defaultSpanKindResolver)(span.name);
 
-  const mapAttributes = hooks.mapAttributes;
-  const attributesInput = mapAttributes
+  const attributesInput = hooks.mapAttributes
     ? { ...span.attributes }
     : (span.attributes as Record<string, SpanAttributeValue>);
-  const attributes = mapAttributes ? mapAttributes(attributesInput) : attributesInput;
+
+  const attributes = hooks.mapAttributes
+    ? hooks.mapAttributes(attributesInput)
+    : attributesInput;
 
   return {
     name: span.name,
@@ -189,21 +192,38 @@ export const collectReadableSpans = (
   return out;
 };
 
-export const exportSpans = (
-  exporter: {
-    export: (
-      spans: Array<ReadableSpan>,
-      cb: (result: { code: ExportResultCode; error?: Error }) => void,
-    ) => void;
-  },
-  spans: Array<ReadableSpan>,
-): Promise<void> =>
-  new Promise<void>((resolve, reject) => {
+const callback = (
+  result: ExportResult,
+  onError?: (error?: Error) => void | undefined,
+) => {
+  if (result.code === ExportResultCode.SUCCESS) {
+    return true;
+  }
+
+  onError?.(result.error);
+  return false;
+};
+
+interface ExportSpans {
+  exporter: SpanExporter;
+  spans: Array<ReadableSpan>;
+  onError?: (error?: Error) => void | undefined;
+}
+
+/**
+ * Exports spans to the OTLP endpoint.
+ * @param exporter - The OTLP exporter to use.
+ * @param spans - The spans to export.
+ * @param onError - The callback to call if the export fails.
+ * @returns True if the export was successful, false if it failed.
+ */
+export const exportSpans = async ({
+  exporter,
+  spans,
+  onError,
+}: ExportSpans): Promise<boolean> =>
+  new Promise((resolve) =>
     exporter.export(spans, (result) => {
-      if (result.code === ExportResultCode.SUCCESS) {
-        resolve();
-        return;
-      }
-      reject(result.error ?? new Error('OTLP export failed'));
-    });
-  });
+      resolve(callback(result, onError));
+    }),
+  );

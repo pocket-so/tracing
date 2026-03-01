@@ -3,31 +3,52 @@ import { ATTR_HTTP_RESPONSE_STATUS_CODE } from '@opentelemetry/semantic-conventi
 
 import type { SpanAttributeValue, TraceSnapshot } from '@/types';
 
-import { coercePrimitive, pickString } from '@/utils/primitives';
-
 interface ErrorInfo {
   type?: string;
   message?: string;
   stack?: string;
 }
 
+const nonEmptyString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.length > 0 ? value : undefined;
+
+const primitiveToMessage = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) return undefined;
+  switch (typeof value) {
+    case 'string': {
+      return value.length > 0 ? value : undefined;
+    }
+    case 'number':
+    case 'boolean':
+    case 'bigint': {
+      return String(value);
+    }
+    case 'symbol': {
+      return value.toString();
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
 export const extractErrorInfo = (err: unknown): ErrorInfo => {
   if (err instanceof Error) {
-    const type = pickString(err.name) ?? 'Error';
-    const message = pickString(err.message);
-    const stack = pickString(err.stack);
+    const type = nonEmptyString(err.name) ?? 'Error';
+    const message = nonEmptyString(err.message);
+    const stack = nonEmptyString(err.stack);
     return { type, message, stack };
   }
 
   if (err && typeof err === 'object') {
     const maybe = err as { name?: unknown; message?: unknown; stack?: unknown };
-    const message = pickString(maybe.message);
-    const type = pickString(maybe.name) ?? (message ? 'Error' : undefined);
-    const stack = pickString(maybe.stack);
+    const message = nonEmptyString(maybe.message);
+    const type = nonEmptyString(maybe.name) ?? (message ? 'Error' : undefined);
+    const stack = nonEmptyString(maybe.stack);
     return { type, message, stack };
   }
 
-  const message = coercePrimitive(err);
+  const message = primitiveToMessage(err);
   return {
     type: message ? 'Error' : undefined,
     message,
