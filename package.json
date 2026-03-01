@@ -1,5 +1,5 @@
 {
-  "name": "@pocket/tracing",
+  "name": "@pocket-so/tracing",
   "version": "1.0.0",
   "exports": {
     "./timescale/db": {
